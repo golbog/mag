@@ -1,0 +1,2 @@
+# [WIP] Autoencoder for chemical compounds in SMILES format
+Goal is to develop a method to convert discrete representations of molecules to and from a multidimensional continuous representation. Meaning using compounds written in SMILES format, encoding them into data that is passable to an autoencodder that encodes them into multidimensional latent space and is able to decode them back. Molecules respresented in latent space could then be used for appropriate machine learning algorithms. 
