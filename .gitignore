@@ -105,7 +105,6 @@ venv.bak/
 .mypy_cache/
 
 # my files and folders
-*.py
 *.txt
 media/
 viri/
