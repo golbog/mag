@@ -1,0 +1,11 @@
+smiles test
+C(CNCCNCCNCCN)N 1 
+CC[C@@H] 0 
+CN1CCCC1C2=CN=CC=C2 1 
+N(=O)[O-] 1 
+N#[N+][O-] 1 
+CC(=O)[O-].[Na+] 0 
+C1=CC(=C(C=C1C(CN)O)O)O 0 
+[OH-] 0 
+FS(F)(F)(F)(F)F 0 
+OP(=O)(O)[O-] 1 
