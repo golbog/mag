@@ -1,5 +1,15 @@
 from rdkit.Chem import AllChem
 from rdkit import DataStructs
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
+import matplotlib.pyplot as plt
+import numpy as np
+import argparse
+from collections import OrderedDict
+from keras.models import Model, model_from_json
+
+
+
 import csv
 import json
 import numpy as np
@@ -14,6 +24,25 @@ def load_data(filename, charset_filename=None, col_smiles=0, col_target=1, start
         max_len = max([len(x) for x in X]) + 1
     X = vectorize_smiles(X, charset, max_len)
     return X, y, charset, chars
+
+def load_fingerprints(filename, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\''):
+    smiles, y = read_data('../data/BBBP.csv', col_smiles=3, col_target=2, delimiter=',')
+    moles = np.array([AllChem.MolFromSmiles(x) for x in smiles])
+
+    valid = [i for i, x in enumerate(moles) if x is not None]
+    moles = moles[valid]
+    y = np.array(y[valid], dtype=np.float)
+
+    fingerprints = [AllChem.GetMorganFingerprintAsBitVect(x, 4) for x in moles]
+
+    Xfinger = list()
+    for x in fingerprints:
+        arr = np.zeros((0,))
+        DataStructs.ConvertToNumpyArray(x, arr)
+        Xfinger.append(arr)
+    Xfinger = np.array(Xfinger)
+
+    return Xfinger, y, valid
 
 def is_valid_smiles(a):
     return AllChem.MolFromSmiles(a) is not None and a != '' and a is not None
@@ -32,13 +61,13 @@ def read_data(filename, col_smiles=0, col_target=1, start_row=1, delimiter=' ', 
                 if smile[-1] != '\n':
                     smile += '\n'
                 smiles.append(smile)
-                targets.append(row[col_target])
+                targets.append(row[col_target] if col_target != -1 else 0)
     return np.array(smiles), np.array(targets)
 
 def load_charset(charset_filename):
     with open(charset_filename, "r") as f:
         charset = json.load(f)
-    chars = np.sort(list(charset.values()))
+    chars = np.sort(list(charset.keys()))
     return chars, charset
 
 def create_fingerprints(moles):
@@ -93,6 +122,71 @@ def devectorize_smiles(smiles, chars):
 def devectorize_smile(smile, chars):
     return ''.join([chars[char_index] for char_index in np.where(smile==1)[1]])
 
+def load_coder_json(file_coder, file_weights, custom_objects):
+    with open(file_coder, "r") as json_file:
+        coder_json = json_file.read()
+
+        coder = model_from_json(coder_json,
+                                  custom_objects=custom_objects)
+        coder.load_weights(file_weights)
+        return coder
+
+def plot_kde(X):
+    from sklearn.neighbors import KernelDensity
+    import matplotlib.pyplot as plt
+    X_plot = np.linspace(X.min() - 1, X.max() + 1, 1000)
+    fig, ax = plt.subplots()
+    for column in range(X.shape[1]):
+        kde = KernelDensity(kernel='gaussian', bandwidth=(X.max() - X.min()) / 50).fit(
+            X[:, column][:, np.newaxis])
+        log_dens = kde.score_samples(X_plot[:, np.newaxis])
+        ax.plot(X_plot, np.exp(log_dens), '-')
+    plt.show()
+
+def correctly_decoded(X_decoded, X_real, chars):
+    pred = devectorize_smiles(X_decoded, chars)
+    real = devectorize_smiles(X_real, chars)
+
+    num_correct = np.sum([np.array_equal(x, y) for x, y in zip(real, pred)])
+    print("Percentage correctly predicted: {0:.2f}".format(100*num_correct/len(pred)))
+
+    mean_error = np.sum([sum(1 for a, b in zip(x, y) if a != b) for x, y in zip(real, pred)]) / len(real)
+    print("Mean error: {0:.2f}".format(mean_error))
+
+def correctly_decoded_with_tries(X, X_real, decoder, chars, noise_norm=False, n=1000):
+    correct = 0
+    for ix, x in enumerate(X):
+        print(ix)
+        for i in range(n):
+            pred = decoder.predict(np.array([perturb_z(x, noise_norm=False if i == 0 else noise_norm)]))[0]
+            pred = np.array((pred.argmax(axis=1)[:, None] == np.arange(pred.shape[1])).astype(int))
+            pred = devectorize_smile(pred, chars)
+            real = devectorize_smile(X_real[ix], chars)
+            if np.array_equal(real, pred):
+                print("correct")
+                correct += 1
+                break
+    print("Percentage correctly predicted: {0:.2f}".format(100 * correct / len(X)))
+
+def classification_test(Xs, y, classifiers, n_splits=10):
+    res = OrderedDict()
+    cv = StratifiedKFold(n_splits=n_splits)
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test]))
+                res[(Xname, cname)] = val/n_splits
+            print("{} | {} : {}".format(Xname, cname, val / n_splits))
+    return res
+
+def perturb_z(z, noise_norm=False):
+    if noise_norm > 0.0:
+        noise_vec = np.random.normal(0, 1, size=z.shape)
+        noise_vec = noise_vec / np.linalg.norm(noise_vec)
+        return z + (noise_norm * noise_vec)
+    return z
 
 if __name__ == '__main__':
     X,y,charset,chars = load_data('../data/250k_rndm_zinc_drugs_clean_3small.csv', col_smiles=0, col_target=1, delimiter=',', max_len=120)

@@ -123,7 +123,7 @@ for a,b in [[9,9], [9,9], [10,11]]:
     x = layers.Conv1D(a, b, activation='tanh')(x)
     x = layers.BatchNormalization(axis=-1)(x)
 x = layers.Flatten()(x)
-x = layers.Dense(196, activation='relu')(x)
+x = layers.Dense(latent_dim, activation='relu')(x)
 
 z_mean = Dense(latent_dim, name='z_mean')(x)
 z_log_var = Dense(latent_dim, name='z_log_var')(x)
@@ -170,7 +170,7 @@ decoder.summary()
 
 # instantiate VAE model
 z_decoded = decoder(z)
-#vae = Model(inputs, outputs, name='vae_mlp')
+#encoder = Model(inputs, outputs, name='vae_mlp')
 
 class CustomVariationalLayer(layers.Layer):
     def vae_loss(self, x, z_decoded):
@@ -194,7 +194,7 @@ vae = Model(inputs, y, name='vae_mlp')
 
 #plot_model(encoder, to_file='vae_mlp_encoder.png', show_shapes=True)
 #plot_model(decoder, to_file='vae_mlp_decoder.png', show_shapes=True)
-#plot_model(vae, to_file='vae_mlp.png', show_shapes=True)
+#plot_model(encoder, to_file='vae_mlp.png', show_shapes=True)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -211,12 +211,18 @@ if __name__ == '__main__':
 
     if args.weights:
         print("using weights")
-        """
-        model_json = vae.to_json()
-        with open("vae_196_120x36.json", "w") as json_file:
-            json_file.write(model_json)
-        """
         vae.load_weights(args.weights)
+
+        model_json = decoder.to_json()
+        with open("1decoder_196_120x36.json", "w") as json_file:
+            json_file.write(model_json)
+        decoder.save_weights('weights/1decoder_weights.h5')
+
+        model_json = encoder.to_json()
+        with open("1encoder_196_120x36.json", "w") as json_file:
+            json_file.write(model_json)
+        encoder.save_weights('weights/1encoder_weights.h5')
+        exit()
     else:
         # train the autoencoder
         checkpoint = ModelCheckpoint('weights.{epoch:02d}-{val_loss:.2f}.hdf5', monitor='val_loss',
