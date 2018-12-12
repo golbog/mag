@@ -1,3 +1,5 @@
+import sys
+
 from rdkit.Chem import AllChem
 from rdkit import DataStructs
 from sklearn.model_selection import StratifiedKFold
@@ -9,6 +11,9 @@ from collections import OrderedDict
 from keras.models import Model, model_from_json
 from sklearn.manifold import TSNE, MDS
 from sklearn.decomposition import PCA
+from keras import layers
+from keras import backend as K
+
 
 
 
@@ -28,15 +33,15 @@ def load_data_vae(filename, charset_filename=None, col_smiles=0, col_target=1, s
     return X, y, charset, chars
 
 def load_data(filename, encoder, charset_filename=None, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\"', max_len=-1):
-    smiles, y, label = read_data(filename, col_smiles=3, col_target=2, delimiter=',')
+    smiles, y, label = read_data(filename, col_smiles=col_smiles, col_target=col_target, delimiter=delimiter, start_row=start_row, quotechar=quotechar)
 
     # VAE
     if charset_filename is None:
-        chars, charset = create_charset(X)
+        chars, charset = create_charset(smiles)
     else:
         chars, charset = load_charset(charset_filename)
     if max_len == -1:
-        max_len = max([len(x) for x in X]) + 1
+        max_len = max([len(x) for x in smiles]) + 1
     Xvae, _ , _ = encoder.predict(vectorize_smiles(smiles, charset, max_len))
 
     # fingerprints
@@ -207,16 +212,16 @@ def classification_test(Xs, y, classifiers, n_splits=10):
     res = OrderedDict()
     cv = StratifiedKFold(n_splits=n_splits)
 
-    Xs['Joined'] = np.vstack((list(Xs.values())))
+    Xs['Joined'] = np.hstack((list(Xs.values())))
 
     for Xname, X in Xs.items():
         for cname, c in classifiers.items():
             val = 0
             for train, test in cv.split(X, y):
                 c.fit(X[train], y[train])
-                val += roc_auc_score(y[test], c.predict(X[test]))
-                res[(Xname, cname)] = val/n_splits
-            print("{:10s} | {:10s} : {:.2f}".format(Xname, cname, val / n_splits))
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] = val
+            print("{:11s} | {:6s} : {:.3f}".format(Xname, cname, val))
     return res
 
 def perturb_z(z, noise_norm=False):
@@ -239,7 +244,7 @@ def plot_tsne_classification(X, y, title, legend_title):
     pca = PCA(n_components=20)
     pca_res = pca.fit_transform(X)
 
-    tsne = TSNE(n_components=2, verbose=1, perplexity=30, n_iter=500)
+    tsne = TSNE(n_components=2, verbose=0, perplexity=30, n_iter=500)
     res = tsne.fit_transform(pca_res)
 
     for yi in np.unique(y):
@@ -248,9 +253,180 @@ def plot_tsne_classification(X, y, title, legend_title):
     plt.title(title)
     plt.xlabel('TSNE 1. component')
     plt.ylabel('TSNE 2. component')
-    plt.legend(title=legend_title, loc='top right')
+    plt.legend(title=legend_title)
     plt.show()
 
+def full_classification_test(classifiers, n_splits=10):
+    ## placeholder
+    sys.path.insert(0, '../code')
+    from vae_smiles import CustomVariationalLayer
+    encoder = load_coder_json("../code/model/encoder.json",
+                                             "../code/weights/encoder.h5",
+                                             custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
+                                                             'latent_dim': 196})
+    res = OrderedDict()
+    cv = StratifiedKFold(n_splits=n_splits)
+    Xvae, Xfinger, y, label, smiles = load_data('../data/BBBP.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=3, col_target=2, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] = val
+            #print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/clintox.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=0, col_target=1, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] += val
+            # print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/clintox.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=0, col_target=2, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] += val
+            # print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/sider.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=0, col_target=1, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] += val
+            # print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/sider.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=0, col_target=2, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] += val
+            # print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/sider.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=0, col_target=4, delimiter=',',
+                                                max_len=120)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    Xs['Joined'] = np.hstack((list(Xs.values())))
+
+    for Xname, X in Xs.items():
+        for cname, c in classifiers.items():
+            val = 0
+            for train, test in cv.split(X, y):
+                c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+            res[(Xname, cname)] += val
+            # print("{:10s} | {:6s} : {:.2f}".format(Xname, cname, val / n_splits))
+
+
+    for key, val in res.items():
+        res[key] = val / 6
+
+    for key, val in res.items():
+        print("{:11s} | {:6s} : {:.3f}".format(key[0], key[1], val))
+
+    return res
+
+
 if __name__ == '__main__':
-    X,y,charset,chars = load_data('../data/250k_rndm_zinc_drugs_clean_3small.csv', col_smiles=0, col_target=1, delimiter=',', max_len=120)
+    sys.path.insert(0, '../code')
+    from vae_smiles import CustomVariationalLayer
+    from sklearn.manifold import TSNE, MDS
+    from sklearn.decomposition import PCA
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.neighbors import KNeighborsClassifier
+    from sklearn.svm import SVC
+    from sklearn.model_selection import train_test_split, StratifiedKFold
+
+    encoder = load_coder_json("../code/model/1encoder_196_120x36.json",
+                              "../code/weights/1encoder_weights.h5",
+                              custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
+                                              'latent_dim': 196})
+    """
+    encoder = load_coder_json("../code/model/1encoder_196_120x36.json",
+                                             "../code/weights/1encoder_weights.h5",
+                                             custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
+                                                             'latent_dim': 196})
+
+    decoder = load_coder_json("../code/model/decoder.json",
+                                             "../code/weights/decoder.h5",
+                                             custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
+                                                             'latent_dim': 196})
+
+    Xsmi, _, charset, chars = load_data_vae('../data/version.smi',
+                                                           charset_filename='../code/model/charset_ZINC.json',
+                                                           col_smiles=0, col_target=-1, delimiter=' ',
+                                                           max_len=120)
+
+    Xsmi = Xsmi[np.random.choice(len(Xsmi), size=100, replace=False)]
+    z_mean, _, _ = encoder.predict(Xsmi, batch_size=500)
+    correctly_decoded_with_tries(z_mean, Xsmi, decoder, chars, noise_norm=5., n=1000)
+    
+
+    Xvae, Xfinger, y, label, smiles = load_data('../data/BBBP.csv', encoder,
+                                                               charset_filename='../code/model/charset_ZINC.json',
+                                                               col_smiles=3, col_target=2, delimiter=',',
+                                                               max_len=120)
+
+    n_splits = 10
+    cv = StratifiedKFold(n_splits=n_splits)
+    svc = SVC(kernel='linear')
+    rfc = RandomForestClassifier(n_estimators=500, random_state=0)
+    classifiers = {'SVM': svc, 'RFC': rfc}
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+
+    classification_test(Xs, y, classifiers, n_splits=10)
+    exit()
+"""
+
+    n_splits = 10
+    cv = StratifiedKFold(n_splits=n_splits)
+    svc = SVC(kernel='linear')
+    rfc = RandomForestClassifier(n_estimators=500, random_state=0)
+    classifiers = {'SVM': svc, 'RFC': rfc}
+    full_classification_test(classifiers)
     pass
