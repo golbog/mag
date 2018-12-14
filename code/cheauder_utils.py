@@ -208,7 +208,7 @@ def correctly_decoded_with_tries(X, X_real, decoder, chars, noise_norm=False, n=
                 break
     print("Percentage correctly predicted: {0:.2f}".format(100 * correct / len(X)))
 
-def classification_test(Xs, y, classifiers, n_splits=10):
+def classification_test(Xs, y, classifiers, n_splits=10, verbose=True):
     res = OrderedDict()
     cv = StratifiedKFold(n_splits=n_splits)
 
@@ -218,10 +218,11 @@ def classification_test(Xs, y, classifiers, n_splits=10):
         for cname, c in classifiers.items():
             val = 0
             for train, test in cv.split(X, y):
-                c.fit(X[train], y[train])
-                val += roc_auc_score(y[test], c.predict(X[test])) / n_splits
+                cl = c.fit(X[train], y[train])
+                val += roc_auc_score(y[test], cl.predict(X[test])) / n_splits
             res[(Xname, cname)] = val
-            print("{:11s} | {:6s} : {:.3f}".format(Xname, cname, val))
+            if verbose:
+                print("{:11s} | {:6s} : {:.3f}".format(Xname, cname, val))
     return res
 
 def perturb_z(z, noise_norm=False):
@@ -233,7 +234,7 @@ def perturb_z(z, noise_norm=False):
 
 def to_csv(filename, smiles, X, y):
     with open(filename, 'w') as f:
-        line = '{},{},{}\n'.format('smiles', ','.join('dim{}'.format(i) for i in range(len(X))), 'y')
+        line = '{},{},{}\n'.format('smiles', ','.join('dim{}'.format(i) for i in range(len(X[0]))), 'y')
         f.write(line)
         for i in range(len(X)):
             line = '{},{},{}\n'.format(smiles[i], ','.join('{}'.format(x) for x in X[i]), y[i])
@@ -381,9 +382,8 @@ if __name__ == '__main__':
     from sklearn.neighbors import KNeighborsClassifier
     from sklearn.svm import SVC
     from sklearn.model_selection import train_test_split, StratifiedKFold
-
-    encoder = load_coder_json("../code/model/1encoder_196_120x36.json",
-                              "../code/weights/1encoder_weights.h5",
+    encoder = load_coder_json("../code/model/encoder.json",
+                              "../code/weights/encoder.h5",
                               custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
                                               'latent_dim': 196})
     """
@@ -423,10 +423,19 @@ if __name__ == '__main__':
     exit()
 """
 
+    Xvae, Xfinger, y, label, smiles = load_data('../data/BBBP.csv', encoder,
+                                                charset_filename='../code/model/charset_ZINC.json',
+                                                col_smiles=3, col_target=2, delimiter=',',
+                                                max_len=120)
+
+    from xgboost import XGBClassifier
+    cv = StratifiedKFold(n_splits=10)
     n_splits = 10
     cv = StratifiedKFold(n_splits=n_splits)
     svc = SVC(kernel='linear')
     rfc = RandomForestClassifier(n_estimators=500, random_state=0)
-    classifiers = {'SVM': svc, 'RFC': rfc}
-    full_classification_test(classifiers)
-    pass
+    classifiers = {'SVM': svc, 'RFC': rfc, 'XGBoost': XGBClassifier()}
+    classifiers = {'XGBoost': XGBClassifier()}
+    X_train, X_test, y_train, y_test = train_test_split(Xvae, y, test_size=0.2, random_state=322)
+    Xs = {'VAE': Xvae, 'Fingerprint': Xfinger}
+    classification_test(Xs, y, classifiers, n_splits=10)
