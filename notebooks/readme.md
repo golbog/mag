@@ -1,1 +1,3 @@
-**010-classification_test.ipnyb** - This notebook shows and tests our implementation of Gómez-Bombarelli et al. variational autoencoder. Tests include classification comparison with RDKit's fingerprints and TSNE plot of latent spaces on BBBP dataset. Classification quality is also tested and averaged over many different databases.
+**010-data.ipnyb** - Predstavitev zbranih podatkov (dimenzionalnost, tip razredne spremenljivke, statistika zapisov SMILESS) in predstavitev notacije SMILES.
+
+**000-classification_test.ipnyb** - This notebook shows and tests our implementation of Gómez-Bombarelli et al. variational autoencoder. Tests include classification comparison with RDKit's fingerprints and TSNE plot of latent spaces on BBBP dataset. Classification quality is also tested and averaged over many different databases.
