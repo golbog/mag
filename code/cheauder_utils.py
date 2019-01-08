@@ -93,6 +93,7 @@ def read_data(filename, col_smiles=0, col_target=1, start_row=1, delimiter=' ', 
         for i in range(start_row): #testiraj
             row = next(reader)
             if i == 0:
+                row = np.array(row)
                 label = row[col_target]
         for row in reader:
             if len(row) > 2:
@@ -139,13 +140,13 @@ def pad_smile(smile, max_len):
         return smile + ' ' * (max_len - len(smile))
     return smile[:max_len]
 
-def vectorize_smiles(smiles, charset, max_len=125):
+def vectorize_smiles(smiles, charset, max_len=120):
     res = list()
     for smile in smiles:
         res.append(vectorize_smile(smile, charset, max_len))
     return np.array(res)
 
-def vectorize_smile(smile, charset, max_len=125):
+def vectorize_smile(smile, charset, max_len=120):
     x = np.zeros((max_len, len(charset)))
     for i, char in enumerate(pad_smile(smile, max_len)):
         #if char == ' ':
@@ -242,6 +243,8 @@ def to_csv(filename, smiles, X, y):
         return True
 
 def plot_tsne_classification(X, y, title, legend_title):
+    y = np.array(y)
+
     pca = PCA(n_components=20)
     pca_res = pca.fit_transform(X)
 
@@ -249,7 +252,7 @@ def plot_tsne_classification(X, y, title, legend_title):
     res = tsne.fit_transform(pca_res)
 
     for yi in np.unique(y):
-        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(bool(yi)), alpha=.3,
+        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=.3,
                  markersize=4)
     plt.title(title)
     plt.xlabel('TSNE 1. component')
@@ -382,6 +385,16 @@ if __name__ == '__main__':
     from sklearn.neighbors import KNeighborsClassifier
     from sklearn.svm import SVC
     from sklearn.model_selection import train_test_split, StratifiedKFold
+
+    #smiles, target, label = read_data('../data/Lipophilicity.csv',col_smiles=2, col_target=1, delimiter=',')
+    #smiles, target, label = read_data('../data/SAMPL.csv',col_smiles=1, col_target=2, delimiter=',', quotechar='\"')
+    #smiles, target, label = read_data('../data/ESOL.csv',col_smiles=9, col_target=1, delimiter=',', quotechar='\"')
+    smiles, target, label = read_data('../data/250k_rndm_zinc_drugs_clean_3.csv',col_smiles=0, col_target=[1,2,3], delimiter=',', quotechar='\"')
+    target = target.astype(np.float)
+    print('{:.2f} {:.2f}'.format(np.mean(target[:,0]), np.std(target[:,0])))
+    print('{:.2f} {:.2f}'.format(np.mean(target[:,1]), np.std(target[:,1])))
+    print('{:.2f} {:.2f}'.format(np.mean(target[:,2]), np.std(target[:,2])))
+    exit()
     encoder = load_coder_json("../code/model/encoder.json",
                               "../code/weights/encoder.h5",
                               custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
