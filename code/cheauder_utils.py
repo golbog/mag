@@ -1,10 +1,14 @@
 import sys
 
-from rdkit.Chem import AllChem
+import umap.umap_ as umap
+from rdkit import Chem
+from rdkit.Chem import AllChem, MACCSkeys
 from rdkit import DataStructs
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
+from sklearn import neighbors
+from sklearn.model_selection import LeaveOneOut
 import numpy as np
 import argparse
 from collections import OrderedDict
@@ -14,14 +18,11 @@ from sklearn.decomposition import PCA
 from keras import layers
 from keras import backend as K
 
-
-
-
 import csv
 import json
 import numpy as np
 
-def load_data_vae(filename, charset_filename=None, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\"', max_len=-1):
+def load_data_vae(filename, charset_filename=None, col_smiles=0, col_target=1, start_row=1, delimiter=',', quotechar='\"', max_len=-1):
     X, y, label = read_data(filename, col_smiles, col_target, start_row, delimiter, quotechar)
     if charset_filename is None:
         chars, charset = create_charset(X)
@@ -63,24 +64,36 @@ def load_data(filename, encoder, charset_filename=None, col_smiles=0, col_target
     return Xvae, Xfinger, y, label, smiles
 
 
-
-def load_fingerprints(filename, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\''):
-    smiles, y, label = read_data(filename, col_smiles=3, col_target=2, delimiter=',')
+def smiles_to_fingerprints(smiles, y):
     moles = np.array([AllChem.MolFromSmiles(x) for x in smiles])
+    Xfinger = dict()
 
     valid = [i for i, x in enumerate(moles) if x is not None]
     moles = moles[valid]
     y = np.array(y[valid], dtype=np.float)
 
-    fingerprints = [AllChem.GetMorganFingerprintAsBitVect(x, 4) for x in moles]
-    Xfinger = list()
-    for x in fingerprints:
-        arr = np.zeros((0,))
-        DataStructs.ConvertToNumpyArray(x, arr)
-        Xfinger.append(arr)
-    Xfinger = np.array(Xfinger)
+    # top
+    fps_top = [Chem.RDKFingerprint(x) for x in moles]
+    fps_top = fp_to_numpy(fps_top)
+    Xfinger['topological'] = fps_top
 
-    return Xfinger, y, valid, label
+    # circ
+    n = 3
+    fps_cir = [Chem.AllChem.GetMorganFingerprintAsBitVect(x, n) for x in moles]
+    fps_cir = fp_to_numpy(fps_cir)
+    Xfinger['circular'] = fps_cir
+
+    # substruct
+    fps_sub = [MACCSkeys.FingerprintMol(x) for x in moles]
+    fps_sub = fp_to_numpy(fps_sub)
+    Xfinger['substructure'] = fps_sub
+
+    # avalon
+    fps_ava = [Chem.AllChem.GetMorganFingerprintAsBitVect(x, n) for x in moles]
+    fps_ava = fp_to_numpy(fps_ava)
+    Xfinger['avalon'] = fps_ava
+
+    return Xfinger, y, valid
 
 def is_valid_smiles(a):
     return AllChem.MolFromSmiles(a) is not None and a != '' and a is not None
@@ -156,6 +169,14 @@ def vectorize_smile(smile, charset, max_len=120):
         except KeyError:
             continue
     return x
+
+def fp_to_numpy(X):
+    Xfinger = list()
+    for x in X:
+        arr = np.zeros((0,))
+        DataStructs.ConvertToNumpyArray(x, arr)
+        Xfinger.append(arr)
+    return np.array(Xfinger)
 
 def devectorize_smiles(smiles, chars):
     return np.array([devectorize_smile(smile, chars) for smile in smiles])
@@ -242,7 +263,7 @@ def to_csv(filename, smiles, X, y):
             f.write(line)
         return True
 
-def plot_tsne_classification(X, y, title, legend_title):
+def plot_tsne_classification(X, y, title, legend_title, alpha=.3, markersize=4):
     y = np.array(y)
 
     pca = PCA(n_components=20)
@@ -252,8 +273,8 @@ def plot_tsne_classification(X, y, title, legend_title):
     res = tsne.fit_transform(pca_res)
 
     for yi in np.unique(y):
-        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=.3,
-                 markersize=4)
+        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=alpha,
+                 markersize=markersize)
     plt.title(title)
     plt.xlabel('TSNE 1. component')
     plt.ylabel('TSNE 2. component')
@@ -373,6 +394,37 @@ def full_classification_test(classifiers, n_splits=10):
     for key, val in res.items():
         print("{:11s} | {:6s} : {:.3f}".format(key[0], key[1], val))
 
+    return res
+
+def one_out_classification(X, y, classifier=neighbors.KNeighborsClassifier(), scorer=roc_auc_score):
+    predictions = np.zeros(len(y))
+    loo = LeaveOneOut()
+    for train_index, test_index in loo.split(X):
+        X_train, X_test, y_train, y_test = X[train_index], X[test_index], y[train_index], y[test_index]
+        predictions[test_index] = classifier.fit(X_train, y_train).predict(X_test)
+    return scorer(y, predictions)
+
+def do_plot(name,X, y, plt, title, legend, pca_n_comp=20, alpha=.4, markersize=4, perp=30, n_iter=500):
+    if name.lower()=='umap':
+        u = umap.UMAP()
+        res = u.fit_transform(X)
+    elif name.lower()=='tsne':
+        pca = PCA(n_components=pca_n_comp)
+        pca_res = pca.fit_transform(X)
+        tsne = TSNE(n_components=2, verbose=0, perplexity=perp, n_iter=n_iter)
+        res = tsne.fit_transform(pca_res)
+    elif name.lower()=='':
+        res = X
+    else:
+        return None
+
+    for yi in np.unique(y):
+        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=alpha,
+                 markersize=markersize)
+    plt.title(title)
+    plt.xlabel('UMAP 1. komponenta')
+    plt.ylabel('UMAP 2. komponenta')
+    plt.legend(title=legend)
     return res
 
 
