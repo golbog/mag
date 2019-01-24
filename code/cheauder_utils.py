@@ -33,7 +33,7 @@ def load_data_vae(filename, charset_filename=None, col_smiles=0, col_target=1, s
     X = vectorize_smiles(X, charset, max_len)
     return X, y, charset, chars
 
-def load_data(filename, encoder, charset_filename=None, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\"', max_len=-1):
+def load_data(filename, vae_encoder, ae_encoder, charset_filename=None, col_smiles=0, col_target=1, start_row=1, delimiter=' ', quotechar='\"', max_len=-1):
     smiles, y, label = read_data(filename, col_smiles=col_smiles, col_target=col_target, delimiter=delimiter, start_row=start_row, quotechar=quotechar)
 
     # VAE
@@ -43,25 +43,17 @@ def load_data(filename, encoder, charset_filename=None, col_smiles=0, col_target
         chars, charset = load_charset(charset_filename)
     if max_len == -1:
         max_len = max([len(x) for x in smiles]) + 1
-    Xvae, _ , _ = encoder.predict(vectorize_smiles(smiles, charset, max_len))
+    oh_smiles = vectorize_smiles(smiles, charset, max_len)
+    Xvae, _, _ = vae_encoder.predict(oh_smiles)
+    Xae = ae_encoder.predict(oh_smiles)
 
     # fingerprints
-    moles = np.array([AllChem.MolFromSmiles(x) for x in smiles])
+    Xfinger, y, valid = smiles_to_fingerprints(smiles, y)
 
-    valid = [i for i, x in enumerate(moles) if x is not None]
-    moles = moles[valid]
-    y = np.array(y[valid], dtype=np.float)
-    Xvae = Xvae[valid] # also remove from encoded
+    Xvae = Xvae[smiles]
+    Xae = Xae[smiles]
 
-    fingerprints = [AllChem.GetMorganFingerprintAsBitVect(x, 4) for x in moles]
-    Xfinger = list()
-    for x in fingerprints:
-        arr = np.zeros((0,))
-        DataStructs.ConvertToNumpyArray(x, arr)
-        Xfinger.append(arr)
-    Xfinger = np.array(Xfinger)
-
-    return Xvae, Xfinger, y, label, smiles
+    return Xvae, Xae, Xfinger, y, label, smiles
 
 
 def smiles_to_fingerprints(smiles, y):
@@ -112,9 +104,7 @@ def read_data(filename, col_smiles=0, col_target=1, start_row=1, delimiter=' ', 
             if len(row) > 2:
                 row = np.array(row)
                 smile = row[col_smiles]
-                if smile[-1] == '\n':
-                    smile = smile[:-1]
-                smiles.append(smile)
+                smiles.append(smile.split()[0])
                 targets.append(row[col_target] if col_target != -1 else 0)
     return np.array(smiles), np.array(targets), label
 
@@ -153,6 +143,7 @@ def pad_smile(smile, max_len):
         return smile + ' ' * (max_len - len(smile))
     return smile[:max_len]
 
+
 def vectorize_smiles(smiles, charset, max_len=120):
     res = list()
     for smile in smiles:
@@ -182,7 +173,7 @@ def devectorize_smiles(smiles, chars):
     return np.array([devectorize_smile(smile, chars) for smile in smiles])
 
 def devectorize_smile(smile, chars):
-    return ''.join([chars[char_index] for char_index in np.where(smile==1)[1]])
+    return ''.join([chars[char_index] for char_index in np.where(smile==1)[1]]).split()[0]
 
 def load_coder_json(file_coder, file_weights, custom_objects):
     with open(file_coder, "r") as json_file:
@@ -218,14 +209,12 @@ def correctly_decoded(X_decoded, X_real, chars):
 def correctly_decoded_with_tries(X, X_real, decoder, chars, noise_norm=False, n=1000):
     correct = 0
     for ix, x in enumerate(X):
-        print(ix)
         for i in range(n):
             pred = decoder.predict(np.array([perturb_z(x, noise_norm=False if i == 0 else noise_norm)]))[0]
             pred = np.array((pred.argmax(axis=1)[:, None] == np.arange(pred.shape[1])).astype(int))
             pred = devectorize_smile(pred, chars)
             real = devectorize_smile(X_real[ix], chars)
             if np.array_equal(real, pred):
-                print("correct")
                 correct += 1
                 break
     print("Percentage correctly predicted: {0:.2f}".format(100 * correct / len(X)))
@@ -233,8 +222,6 @@ def correctly_decoded_with_tries(X, X_real, decoder, chars, noise_norm=False, n=
 def classification_test(Xs, y, classifiers, n_splits=10, verbose=True):
     res = OrderedDict()
     cv = StratifiedKFold(n_splits=n_splits)
-
-    Xs['Joined'] = np.hstack((list(Xs.values())))
 
     for Xname, X in Xs.items():
         for cname, c in classifiers.items():
@@ -263,7 +250,7 @@ def to_csv(filename, smiles, X, y):
             f.write(line)
         return True
 
-def plot_tsne_classification(X, y, title, legend_title, alpha=.3, markersize=4):
+def plot_tsne_classification(X, y, plot_title, legend_title, legend_labels, alpha=.3, markersize=4):
     y = np.array(y)
 
     pca = PCA(n_components=20)
@@ -273,25 +260,52 @@ def plot_tsne_classification(X, y, title, legend_title, alpha=.3, markersize=4):
     res = tsne.fit_transform(pca_res)
 
     for yi in np.unique(y):
-        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=alpha,
+        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=legend_labels[yi], alpha=alpha,
                  markersize=markersize)
-    plt.title(title)
-    plt.xlabel('TSNE 1. component')
-    plt.ylabel('TSNE 2. component')
+    plt.title(plot_title)
+    plt.axis('off')
     plt.legend(title=legend_title)
     plt.show()
+
+
+def do_plot(name,X, y, plt, plot_title, legend_title, legend_labels, pca_n_comp=20, alpha=.4, markersize=4, perp=30, n_iter=500):
+    if name.lower()=='umap':
+        u = umap.UMAP()
+        res = u.fit_transform(X)
+    elif name.lower()=='tsne':
+        pca = PCA(n_components=pca_n_comp)
+        pca_res = pca.fit_transform(X)
+        tsne = TSNE(n_components=2, verbose=0, perplexity=perp, n_iter=n_iter)
+        res = tsne.fit_transform(pca_res)
+    elif name.lower()=='':
+        res = X
+    else:
+        return None
+
+    for yi in np.unique(y):
+        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=legend_labels[yi], alpha=alpha,
+                 markersize=markersize)
+    plt.title('{} ({:.3f})'.format(plot_title, one_out_classification(res, y)))
+    plt.xlabel('{} 1. komponenta'.format(name.upper()))
+    plt.ylabel('{} 2. komponenta'.format(name.upper()))
+    plt.legend(title=legend_title)
+    return res
+
 
 def full_classification_test(classifiers, n_splits=10):
     ## placeholder
     sys.path.insert(0, '../code')
     from vae_smiles import CustomVariationalLayer
-    encoder = load_coder_json("../code/model/encoder.json",
+    vae_encoder = load_coder_json("../code/model/encoder.json",
                                              "../code/weights/encoder.h5",
                                              custom_objects={'CustomVariationalLayer': CustomVariationalLayer,
                                                              'latent_dim': 196})
+    ae_encoder = load_coder_json("../code/model/ae_encoder.json",
+                                  "../code/weights/ae_encoder.h5",
+                                  custom_objects={'latent_dim': 196})
     res = OrderedDict()
     cv = StratifiedKFold(n_splits=n_splits)
-    Xvae, Xfinger, y, label, smiles = load_data('../data/BBBP.csv', encoder,
+    Xvae, Xae, Xfinger, y, label, smiles = load_data('../data/BBBP.csv', vae_encoder, ae_encoder,
                                                 charset_filename='../code/model/charset_ZINC.json',
                                                 col_smiles=3, col_target=2, delimiter=',',
                                                 max_len=120)
@@ -403,29 +417,6 @@ def one_out_classification(X, y, classifier=neighbors.KNeighborsClassifier(), sc
         X_train, X_test, y_train, y_test = X[train_index], X[test_index], y[train_index], y[test_index]
         predictions[test_index] = classifier.fit(X_train, y_train).predict(X_test)
     return scorer(y, predictions)
-
-def do_plot(name,X, y, plt, title, legend, pca_n_comp=20, alpha=.4, markersize=4, perp=30, n_iter=500):
-    if name.lower()=='umap':
-        u = umap.UMAP()
-        res = u.fit_transform(X)
-    elif name.lower()=='tsne':
-        pca = PCA(n_components=pca_n_comp)
-        pca_res = pca.fit_transform(X)
-        tsne = TSNE(n_components=2, verbose=0, perplexity=perp, n_iter=n_iter)
-        res = tsne.fit_transform(pca_res)
-    elif name.lower()=='':
-        res = X
-    else:
-        return None
-
-    for yi in np.unique(y):
-        plt.plot(np.array(res[:, 0])[y == yi], np.array(res[:, 1])[y == yi], 'o', label=str(yi), alpha=alpha,
-                 markersize=markersize)
-    plt.title(title)
-    plt.xlabel('UMAP 1. komponenta')
-    plt.ylabel('UMAP 2. komponenta')
-    plt.legend(title=legend)
-    return res
 
 
 if __name__ == '__main__':
