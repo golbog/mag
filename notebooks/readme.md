@@ -8,6 +8,6 @@
 
 **050-klasifikacija.ipnyb** - Primerjanje klasifikacijske točnosti med prstnimi odtisi, variacijskimi in nevariacijskimi vložitvami ter smiselnimi kombinacijami.
 
-**050-vae.ipnyb** - Prikaz uporabe variacijskega avtokodirnika in delež pravilno dekodiranih ter povprečno število napak.
+**060-vae.ipnyb** - Prikaz uporabe variacijskega avtokodirnika in delež pravilno dekodiranih ter povprečno število napak.
 
 **000-classification_test.ipnyb** - This notebook shows and tests our implementation of Gómez-Bombarelli et al. variational autoencoder. Tests include classification comparison with RDKit's fingerprints and TSNE plot of latent spaces on BBBP dataset. Classification quality is also tested and averaged over many different databases.
