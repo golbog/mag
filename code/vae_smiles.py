@@ -1,46 +1,16 @@
-'''Example of VAE on MNIST dataset using MLP
-
-The VAE has a modular design. The encoder, decoder and VAE
-are 3 models that share weights. After training the VAE model,
-the encoder can be used to  generate latent vectors.
-The decoder can be used to generate MNIST digits by sampling the
-latent vector from a Gaussian distribution with mean=0 and std=1.
-
-# Reference
-
-[1] Kingma, Diederik P., and Max Welling.
-"Auto-encoding variational bayes."
-https://arxiv.org/abs/1312.6114
-'''
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from keras import layers
-from keras.layers import Lambda, Input, Dense, Dropout, BatchNormalization
-from keras.models import Model, load_model
+from keras.layers import Lambda, Input, Dense
+from keras.models import Model
 from keras.callbacks import ModelCheckpoint
-from keras.datasets import mnist
 from keras.losses import mse, binary_crossentropy
-from keras.utils import plot_model
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping
 from keras import backend as K
-import pickle
-
-import numpy as np
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
+
 import argparse
-import os
 
 import cheauder_utils
-
-#os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
-# reparameterization trick
-# instead of sampling from Q(z|X), sample eps = N(0,I)
-# z = z_mean + sqrt(var)*eps
 
 class VAE:
     def __init__(self, X, inter_dim=512, batch_size=1024, latent_dim=196, epochs=500, dropout_rate=0.09, gru_size=488, verbose=True, **kwargs):
